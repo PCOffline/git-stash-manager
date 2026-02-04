@@ -1,4 +1,5 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
+set -euo pipefail
 # Git Stash Manager - Interactive TUI for managing git stashes
 # Uses fzf when available, falls back to simple numbered menu otherwise
 
@@ -7,14 +8,14 @@ CONFIG_DIR="$HOME/.config/git-stash-manager"
 CONFIG_FILE="$CONFIG_DIR/config"
 
 # Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-DIM='\033[2m'
-NC='\033[0m' # No Color
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[0;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+NC=$'\033[0m' # No Color
 
 # Load default action from config file
 load_default_action() {
@@ -31,14 +32,14 @@ save_default_action() {
 
 # Prompt user to choose default action for Enter key
 prompt_default_action() {
-    echo "" >&2
-    echo "${BOLD}What should Enter do by default?${NC}" >&2
-    echo "  ${CYAN}a)${NC} Apply stash" >&2
-    echo "  ${CYAN}v)${NC} View full diff in pager" >&2
-    echo "  ${CYAN}p)${NC} Pop stash (apply + remove)" >&2
-    echo "  ${CYAN}r)${NC} Rename stash" >&2
-    echo "" >&2
-    echo -n "${YELLOW}Choice [a/v/p/r]: ${NC}" >&2
+    printf "\n" >&2
+    printf "%sWhat should Enter do by default?%s\n" "$BOLD" "$NC" >&2
+    printf "  %sa)%s Apply stash\n" "$CYAN" "$NC" >&2
+    printf "  %sv)%s View full diff in pager\n" "$CYAN" "$NC" >&2
+    printf "  %sp)%s Pop stash (apply + remove)\n" "$CYAN" "$NC" >&2
+    printf "  %sr)%s Rename stash\n" "$CYAN" "$NC" >&2
+    printf "\n" >&2
+    printf "%sChoice [a/v/p/r]: %s" "$YELLOW" "$NC" >&2
     read -r choice
     case "$choice" in
         a|A) echo "apply" ;;
@@ -55,7 +56,7 @@ get_default_action() {
     if [[ -z "$action" ]]; then
         action=$(prompt_default_action)
         save_default_action "$action"
-        echo "${GREEN}Saved '$action' as default Enter action${NC}" >&2
+        printf "%sSaved '%s' as default Enter action%s\n" "$GREEN" "$action" "$NC" >&2
         sleep 1
     fi
     echo "$action"
@@ -64,7 +65,7 @@ get_default_action() {
 # Check if we're in a git repository
 check_git_repo() {
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
-        echo "${RED}Error: Not a git repository${NC}"
+        printf "%sError: Not a git repository%s\n" "$RED" "$NC"
         exit 1
     fi
 }
@@ -93,7 +94,7 @@ get_stash_ref() {
 confirm() {
     local prompt="$1"
     local response
-    echo -n "${YELLOW}${prompt} [y/N]: ${NC}"
+    printf "%s%s [y/N]: %s" "$YELLOW" "$prompt" "$NC"
     read -r response
     [[ "$response" =~ ^[Yy]$ ]]
 }
@@ -114,9 +115,9 @@ do_apply() {
     
     if confirm "Apply $stash_ref?"; then
         if git stash apply "$stash_ref"; then
-            echo "${GREEN}Applied $stash_ref${NC}"
+            printf "%sApplied %s%s\n" "$GREEN" "$stash_ref" "$NC"
         else
-            echo "${RED}Failed to apply $stash_ref${NC}"
+            printf "%sFailed to apply %s%s\n" "$RED" "$stash_ref" "$NC"
         fi
     fi
 }
@@ -127,9 +128,9 @@ do_pop() {
     
     if confirm "Pop $stash_ref? (will remove from stash list)"; then
         if git stash pop "$stash_ref"; then
-            echo "${GREEN}Popped $stash_ref${NC}"
+            printf "%sPopped %s%s\n" "$GREEN" "$stash_ref" "$NC"
         else
-            echo "${RED}Failed to pop $stash_ref${NC}"
+            printf "%sFailed to pop %s%s\n" "$RED" "$stash_ref" "$NC"
         fi
     fi
 }
@@ -140,9 +141,9 @@ do_drop() {
     
     if confirm "Drop $stash_ref? (PERMANENTLY DELETES)"; then
         if git stash drop "$stash_ref"; then
-            echo "${GREEN}Dropped $stash_ref${NC}"
+            printf "%sDropped %s%s\n" "$GREEN" "$stash_ref" "$NC"
         else
-            echo "${RED}Failed to drop $stash_ref${NC}"
+            printf "%sFailed to drop %s%s\n" "$RED" "$stash_ref" "$NC"
         fi
     fi
 }
@@ -153,20 +154,27 @@ do_rename() {
     local stash_commit
     local new_message
     
-    stash_commit=$(git rev-parse "$stash_ref")
+    stash_commit=$(git rev-parse "$stash_ref") || {
+        printf "%sFailed to get stash commit%s\n" "$RED" "$NC"
+        return 1
+    }
     
-    echo -n "${BLUE}Enter new message: ${NC}"
+    printf "%sEnter new message: %s" "$BLUE" "$NC"
     read -r new_message
     
     if [[ -z "$new_message" ]]; then
-        echo "${YELLOW}Cancelled (empty message)${NC}"
+        printf "%sCancelled (empty message)%s\n" "$YELLOW" "$NC"
         return
     fi
     
-    # Drop old stash and store with new message
-    git stash drop "$stash_ref" > /dev/null 2>&1
-    git stash store -m "$new_message" "$stash_commit"
-    echo "${GREEN}Renamed stash${NC}"
+    # Store new stash first, then drop old one (safer order)
+    if git stash store -m "$new_message" "$stash_commit"; then
+        git stash drop "$stash_ref" > /dev/null 2>&1
+        printf "%sRenamed stash%s\n" "$GREEN" "$NC"
+    else
+        printf "%sFailed to rename stash%s\n" "$RED" "$NC"
+        return 1
+    fi
 }
 
 # FZF mode - full interactive experience
@@ -196,7 +204,7 @@ fzf_mode() {
         stashes=$(get_stashes)
         
         if [[ -z "$stashes" ]]; then
-            echo "${YELLOW}No stashes found${NC}"
+            printf "%sNo stashes found%s\n" "$YELLOW" "$NC"
             return 0
         fi
         
@@ -307,27 +315,27 @@ simple_mode() {
         stashes=$(get_stashes)
         
         if [[ -z "$stashes" ]]; then
-            echo "${YELLOW}No stashes found${NC}"
+            printf "%sNo stashes found%s\n" "$YELLOW" "$NC"
             return 0
         fi
         
-        echo ""
-        echo "${BOLD}=== Git Stashes ===${NC}"
-        echo ""
+        printf "\n"
+        printf "%s=== Git Stashes ===%s\n" "$BOLD" "$NC"
+        printf "\n"
         
         # Display numbered list
         local i=1
         stash_array=()
         while IFS= read -r line; do
             stash_array+=("$line")
-            echo "  ${BLUE}[$i]${NC} $line"
-            ((i++))
+            printf "  %s[%d]%s %s\n" "$BLUE" "$i" "$NC" "$line"
+            i=$((i + 1))
         done <<< "$stashes"
         
         echo ""
-        echo "${BOLD}Actions:${NC} ${GREEN}v${NC}=view ${GREEN}a${NC}=apply ${GREEN}p${NC}=pop ${RED}d${NC}=drop ${BLUE}r${NC}=rename ${YELLOW}q${NC}=quit"
-        echo ""
-        echo -n "Enter number (1-$((i-1))) then action key, or q to quit: "
+        printf "%sActions:%s %sv%s=view %sa%s=apply %sp%s=pop %sd%s=drop %sr%s=rename %sq%s=quit\n" "$BOLD" "$NC" "$GREEN" "$NC" "$GREEN" "$NC" "$GREEN" "$NC" "$RED" "$NC" "$BLUE" "$NC" "$YELLOW" "$NC"
+        printf "\n"
+        printf "Enter number (1-%d) then action key, or q to quit: " "$((i-1))"
         read -r choice
         
         # Check for quit
@@ -341,18 +349,18 @@ simple_mode() {
         action_key=$(echo "$choice" | grep -o '[a-zA-Z]$')
         
         if [[ -z "$num" || -z "$action_key" ]]; then
-            echo "${RED}Invalid input. Use format: <number><action> (e.g., 1v, 2d)${NC}"
+            printf "%sInvalid input. Use format: <number><action> (e.g., 1v, 2d)%s\n" "$RED" "$NC"
             sleep 1
             continue
         fi
         
         if [[ "$num" -lt 1 || "$num" -gt "${#stash_array[@]}" ]]; then
-            echo "${RED}Invalid stash number${NC}"
+            printf "%sInvalid stash number%s\n" "$RED" "$NC"
             sleep 1
             continue
         fi
         
-        stash_line="${stash_array[$num]}"
+        stash_line="${stash_array[$((num-1))]}"
         stash_ref=$(get_stash_ref "$stash_line")
         
         case "$action_key" in
@@ -376,7 +384,7 @@ simple_mode() {
                 sleep 1
                 ;;
             *)
-                echo "${RED}Unknown action: $action_key${NC}"
+                printf "%sUnknown action: %s%s\n" "$RED" "$action_key" "$NC"
                 sleep 1
                 ;;
         esac
@@ -390,8 +398,8 @@ main() {
     if has_fzf; then
         fzf_mode
     else
-        echo "${YELLOW}Note: Install fzf for a better experience (brew install fzf)${NC}"
-        echo ""
+        printf "%sNote: Install fzf for a better experience (brew install fzf)%s\n" "$YELLOW" "$NC"
+        printf "\n"
         simple_mode
     fi
 }
