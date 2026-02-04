@@ -14,8 +14,11 @@ YELLOW=$'\033[0;33m'
 BLUE=$'\033[0;34m'
 CYAN=$'\033[0;36m'
 BOLD=$'\033[1m'
-DIM=$'\033[2m'
 NC=$'\033[0m' # No Color
+
+# Helper functions for colored output
+msg() { printf "%s%s%s\n" "$1" "$2" "$NC"; }
+msg_n() { printf "%s%s%s" "$1" "$2" "$NC"; }  # no newline
 
 # Load default action from config file
 load_default_action() {
@@ -65,7 +68,7 @@ get_default_action() {
 # Check if we're in a git repository
 check_git_repo() {
     if ! git rev-parse --git-dir > /dev/null 2>&1; then
-        printf "%sError: Not a git repository%s\n" "$RED" "$NC"
+        msg "$RED" "Error: Not a git repository"
         exit 1
     fi
 }
@@ -115,9 +118,9 @@ do_apply() {
     
     if confirm "Apply $stash_ref?"; then
         if git stash apply "$stash_ref"; then
-            printf "%sApplied %s%s\n" "$GREEN" "$stash_ref" "$NC"
+            msg "$GREEN" "Applied $stash_ref"
         else
-            printf "%sFailed to apply %s%s\n" "$RED" "$stash_ref" "$NC"
+            msg "$RED" "Failed to apply $stash_ref"
         fi
     fi
 }
@@ -128,9 +131,9 @@ do_pop() {
     
     if confirm "Pop $stash_ref? (will remove from stash list)"; then
         if git stash pop "$stash_ref"; then
-            printf "%sPopped %s%s\n" "$GREEN" "$stash_ref" "$NC"
+            msg "$GREEN" "Popped $stash_ref"
         else
-            printf "%sFailed to pop %s%s\n" "$RED" "$stash_ref" "$NC"
+            msg "$RED" "Failed to pop $stash_ref"
         fi
     fi
 }
@@ -141,9 +144,9 @@ do_drop() {
     
     if confirm "Drop $stash_ref? (PERMANENTLY DELETES)"; then
         if git stash drop "$stash_ref"; then
-            printf "%sDropped %s%s\n" "$GREEN" "$stash_ref" "$NC"
+            msg "$GREEN" "Dropped $stash_ref"
         else
-            printf "%sFailed to drop %s%s\n" "$RED" "$stash_ref" "$NC"
+            msg "$RED" "Failed to drop $stash_ref"
         fi
     fi
 }
@@ -155,7 +158,7 @@ do_rename() {
     local new_message
     
     stash_commit=$(git rev-parse "$stash_ref") || {
-        printf "%sFailed to get stash commit%s\n" "$RED" "$NC"
+        msg "$RED" "Failed to get stash commit"
         return 1
     }
     
@@ -163,16 +166,16 @@ do_rename() {
     read -r new_message
     
     if [[ -z "$new_message" ]]; then
-        printf "%sCancelled (empty message)%s\n" "$YELLOW" "$NC"
+        msg "$YELLOW" "Cancelled (empty message)"
         return
     fi
     
     # Store new stash first, then drop old one (safer order)
     if git stash store -m "$new_message" "$stash_commit"; then
         git stash drop "$stash_ref" > /dev/null 2>&1
-        printf "%sRenamed stash%s\n" "$GREEN" "$NC"
+        msg "$GREEN" "Renamed stash"
     else
-        printf "%sFailed to rename stash%s\n" "$RED" "$NC"
+        msg "$RED" "Failed to rename stash"
         return 1
     fi
 }
@@ -204,7 +207,7 @@ fzf_mode() {
         stashes=$(get_stashes)
         
         if [[ -z "$stashes" ]]; then
-            printf "%sNo stashes found%s\n" "$YELLOW" "$NC"
+            msg "$YELLOW" "No stashes found"
             return 0
         fi
         
@@ -315,12 +318,12 @@ simple_mode() {
         stashes=$(get_stashes)
         
         if [[ -z "$stashes" ]]; then
-            printf "%sNo stashes found%s\n" "$YELLOW" "$NC"
+            msg "$YELLOW" "No stashes found"
             return 0
         fi
         
         printf "\n"
-        printf "%s=== Git Stashes ===%s\n" "$BOLD" "$NC"
+        msg "$BOLD" "=== Git Stashes ==="
         printf "\n"
         
         # Display numbered list
@@ -332,7 +335,7 @@ simple_mode() {
             i=$((i + 1))
         done <<< "$stashes"
         
-        echo ""
+        printf "\n"
         printf "%sActions:%s %sv%s=view %sa%s=apply %sp%s=pop %sd%s=drop %sr%s=rename %sq%s=quit\n" "$BOLD" "$NC" "$GREEN" "$NC" "$GREEN" "$NC" "$GREEN" "$NC" "$RED" "$NC" "$BLUE" "$NC" "$YELLOW" "$NC"
         printf "\n"
         printf "Enter number (1-%d) then action key, or q to quit: " "$((i-1))"
@@ -349,13 +352,13 @@ simple_mode() {
         action_key=$(echo "$choice" | grep -o '[a-zA-Z]$')
         
         if [[ -z "$num" || -z "$action_key" ]]; then
-            printf "%sInvalid input. Use format: <number><action> (e.g., 1v, 2d)%s\n" "$RED" "$NC"
+            msg "$RED" "Invalid input. Use format: <number><action> (e.g., 1v, 2d)"
             sleep 1
             continue
         fi
         
         if [[ "$num" -lt 1 || "$num" -gt "${#stash_array[@]}" ]]; then
-            printf "%sInvalid stash number%s\n" "$RED" "$NC"
+            msg "$RED" "Invalid stash number"
             sleep 1
             continue
         fi
@@ -384,7 +387,7 @@ simple_mode() {
                 sleep 1
                 ;;
             *)
-                printf "%sUnknown action: %s%s\n" "$RED" "$action_key" "$NC"
+                msg "$RED" "Unknown action: $action_key"
                 sleep 1
                 ;;
         esac
@@ -398,7 +401,7 @@ main() {
     if has_fzf; then
         fzf_mode
     else
-        printf "%sNote: Install fzf for a better experience (brew install fzf)%s\n" "$YELLOW" "$NC"
+        msg "$YELLOW" "Note: Install fzf for a better experience (brew install fzf)"
         printf "\n"
         simple_mode
     fi

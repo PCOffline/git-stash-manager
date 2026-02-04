@@ -4,6 +4,7 @@
 
 set -e
 
+# Colors
 RED=$'\033[0;31m'
 GREEN=$'\033[0;32m'
 YELLOW=$'\033[0;33m'
@@ -14,132 +15,124 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_NAME="git-stash-manager.sh"
 SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_NAME"
 
-printf "%sGit Stash Manager - Installation%s\n" "$BLUE" "$NC"
-printf "\n"
+# ============================================================================
+# Package Manager Abstraction
+# ============================================================================
 
 # Detect OS
 detect_os() {
     case "$(uname -s)" in
-        Darwin*)            echo "macos" ;;
-        Linux*)             echo "linux" ;;
+        Darwin*)              echo "macos" ;;
+        Linux*)               echo "linux" ;;
         MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
-        *)                  echo "unknown" ;;
+        *)                    echo "unknown" ;;
     esac
 }
 
-# Check if fzf is installed
+# Detect available package manager
+detect_package_manager() {
+    local os
+    os=$(detect_os)
+    case "$os" in
+        macos)
+            command -v brew >/dev/null 2>&1 && echo "brew" || echo "none"
+            ;;
+        linux)
+            if command -v apt-get >/dev/null 2>&1; then echo "apt"
+            elif command -v dnf >/dev/null 2>&1; then echo "dnf"
+            elif command -v pacman >/dev/null 2>&1; then echo "pacman"
+            elif command -v apk >/dev/null 2>&1; then echo "apk"
+            else echo "none"
+            fi
+            ;;
+        windows)
+            if command -v winget >/dev/null 2>&1; then echo "winget"
+            elif command -v choco >/dev/null 2>&1; then echo "choco"
+            elif command -v scoop >/dev/null 2>&1; then echo "scoop"
+            else echo "none"
+            fi
+            ;;
+        *)
+            echo "none"
+            ;;
+    esac
+}
+
+# Run install command for a package manager
+install_with() {
+    local pm="$1" pkg="$2"
+    case "$pm" in
+        brew)   brew install "$pkg" ;;
+        apt)    sudo apt-get update && sudo apt-get install -y "$pkg" ;;
+        dnf)    sudo dnf install -y "$pkg" ;;
+        pacman) sudo pacman -S --noconfirm "$pkg" ;;
+        apk)    sudo apk add "$pkg" ;;
+        winget) winget install "$pkg" ;;
+        choco)  choco install "$pkg" -y ;;
+        scoop)  scoop install "$pkg" ;;
+        *)      return 1 ;;
+    esac
+}
+
+# Get the correct package name for a given package manager
+get_package_name() {
+    local pkg="$1" pm="$2"
+    case "$pkg:$pm" in
+        fzf:winget)     echo "junegunn.fzf" ;;
+        delta:brew)     echo "git-delta" ;;
+        delta:apt)      echo "git-delta" ;;
+        delta:dnf)      echo "git-delta" ;;
+        delta:pacman)   echo "git-delta" ;;
+        delta:winget)   echo "dandavison.delta" ;;
+        *)              echo "$pkg" ;;
+    esac
+}
+
+# Generic package installer
+install_package() {
+    local pkg="$1"
+    local pm
+    pm=$(detect_package_manager)
+    
+    if [[ "$pm" == "none" ]]; then
+        printf "%sNo package manager found. Please install %s manually.%s\n" "$YELLOW" "$pkg" "$NC"
+        case "$pkg" in
+            fzf)   printf "  https://github.com/junegunn/fzf#installation\n" ;;
+            delta) printf "  https://github.com/dandavison/delta#installation\n" ;;
+        esac
+        return 1
+    fi
+    
+    local pkg_name
+    pkg_name=$(get_package_name "$pkg" "$pm")
+    
+    printf "%sInstalling %s via %s...%s\n" "$YELLOW" "$pkg" "$pm" "$NC"
+    if install_with "$pm" "$pkg_name"; then
+        printf "%s%s installed successfully%s\n" "$GREEN" "$pkg" "$NC"
+        return 0
+    else
+        printf "%sFailed to install %s%s\n" "$RED" "$pkg" "$NC"
+        return 1
+    fi
+}
+
+# ============================================================================
+# Dependency Checks
+# ============================================================================
+
 check_fzf() {
-    command -v fzf > /dev/null 2>&1
+    command -v fzf >/dev/null 2>&1
 }
 
-# Check if delta is installed
 check_delta() {
-    command -v delta > /dev/null 2>&1
+    command -v delta >/dev/null 2>&1
 }
 
-# Install delta
-install_delta() {
-    local os=$(detect_os)
-    
-    printf "%sInstalling delta...%s\n" "$YELLOW" "$NC"
-    
-    case "$os" in
-        macos)
-            if command -v brew > /dev/null 2>&1; then
-                brew install git-delta
-            else
-                printf "%sHomebrew not found. Please install delta manually: https://github.com/dandavison/delta#installation%s\n" "$RED" "$NC"
-                return 1
-            fi
-            ;;
-        linux)
-            if command -v apt-get > /dev/null 2>&1; then
-                sudo apt-get update && sudo apt-get install -y git-delta
-            elif command -v dnf > /dev/null 2>&1; then
-                sudo dnf install -y git-delta
-            elif command -v pacman > /dev/null 2>&1; then
-                sudo pacman -S --noconfirm git-delta
-            else
-                printf "%sCould not detect package manager. Please install delta manually: https://github.com/dandavison/delta#installation%s\n" "$YELLOW" "$NC"
-                return 1
-            fi
-            ;;
-        windows)
-            if command -v winget > /dev/null 2>&1; then
-                winget install dandavison.delta
-            elif command -v choco > /dev/null 2>&1; then
-                choco install delta -y
-            elif command -v scoop > /dev/null 2>&1; then
-                scoop install delta
-            else
-                printf "%sNo package manager found. Please install delta manually: https://github.com/dandavison/delta#installation%s\n" "$YELLOW" "$NC"
-                printf "  Or install via: winget, chocolatey, or scoop\n"
-                return 1
-            fi
-            ;;
-        *)
-            printf "%sPlease install delta manually: https://github.com/dandavison/delta#installation%s\n" "$YELLOW" "$NC"
-            return 1
-            ;;
-    esac
-    
-    printf "%sdelta installed successfully%s\n" "$GREEN" "$NC"
-}
+# ============================================================================
+# PATH Setup
+# ============================================================================
 
-# Install fzf
-install_fzf() {
-    local os=$(detect_os)
-    
-    printf "%sInstalling fzf...%s\n" "$YELLOW" "$NC"
-    
-    case "$os" in
-        macos)
-            if command -v brew > /dev/null 2>&1; then
-                brew install fzf
-            else
-                printf "%sHomebrew not found. Please install Homebrew first:%s\n" "$RED" "$NC"
-                printf "  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"\n"
-                exit 1
-            fi
-            ;;
-        linux)
-            if command -v apt-get > /dev/null 2>&1; then
-                sudo apt-get update && sudo apt-get install -y fzf
-            elif command -v dnf > /dev/null 2>&1; then
-                sudo dnf install -y fzf
-            elif command -v pacman > /dev/null 2>&1; then
-                sudo pacman -S --noconfirm fzf
-            elif command -v apk > /dev/null 2>&1; then
-                sudo apk add fzf
-            else
-                printf "%sCould not detect package manager. Installing fzf from git...%s\n" "$YELLOW" "$NC"
-                git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
-                ~/.fzf/install --all
-            fi
-            ;;
-        windows)
-            if command -v winget > /dev/null 2>&1; then
-                winget install junegunn.fzf
-            elif command -v choco > /dev/null 2>&1; then
-                choco install fzf -y
-            elif command -v scoop > /dev/null 2>&1; then
-                scoop install fzf
-            else
-                printf "%sNo package manager found. Installing fzf from git...%s\n" "$YELLOW" "$NC"
-                git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
-                ~/.fzf/install --all
-            fi
-            ;;
-        *)
-            printf "%sUnknown OS. Please install fzf manually: https://github.com/junegunn/fzf#installation%s\n" "$RED" "$NC"
-            exit 1
-            ;;
-    esac
-    
-    printf "%sfzf installed successfully%s\n" "$GREEN" "$NC"
-}
-
-# Create symlink to PATH (Unix)
+# Create symlink (Unix)
 create_symlink() {
     local target_dir="$1"
     local link_name="${2:-gsm}"
@@ -258,8 +251,14 @@ setup_path_windows() {
     printf "  bash %s\n" "$SCRIPT_PATH"
 }
 
-# Main installation
+# ============================================================================
+# Main
+# ============================================================================
+
 main() {
+    printf "%sGit Stash Manager - Installation%s\n" "$BLUE" "$NC"
+    printf "\n"
+    
     # Check if script exists
     if [[ ! -f "$SCRIPT_PATH" ]]; then
         printf "%sError: %s not found%s\n" "$RED" "$SCRIPT_PATH" "$NC"
@@ -277,7 +276,7 @@ main() {
         printf "Install fzf? [Y/n]: "
         read -r response
         if [[ ! "$response" =~ ^[Nn]$ ]]; then
-            install_fzf
+            install_package fzf || true
         else
             printf "%sSkipping fzf installation. The script will use fallback mode.%s\n" "$YELLOW" "$NC"
         fi
@@ -293,7 +292,7 @@ main() {
         printf "Install delta? [Y/n]: "
         read -r response
         if [[ ! "$response" =~ ^[Nn]$ ]]; then
-            install_delta || true
+            install_package delta || true
         else
             printf "%sSkipping delta installation. Diffs will use basic formatting.%s\n" "$YELLOW" "$NC"
         fi
@@ -302,7 +301,8 @@ main() {
     printf "\n"
     
     # Setup PATH based on OS
-    local os=$(detect_os)
+    local os
+    os=$(detect_os)
     if [[ "$os" == "windows" ]]; then
         setup_path_windows
     else
