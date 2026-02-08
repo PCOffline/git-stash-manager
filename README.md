@@ -64,7 +64,7 @@ Use arrow keys to navigate between stashes. The diff preview updates automatical
 
 ### Default Action
 
-On first run, you'll be prompted to choose a default action for the Enter key (apply, view, pop, or rename). This preference is saved to `~/.config/git-stash-manager/config`.
+On first run, you'll be prompted to choose a default action for the Enter key (apply, view, or pop). This preference is saved to `~/.config/git-stash-manager/config`.
 
 ## Troubleshooting
 
