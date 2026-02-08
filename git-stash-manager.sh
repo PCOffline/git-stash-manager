@@ -340,7 +340,7 @@ fzf_mode() {
             ' \
             --bind 'r:transform:
                 stash=$(echo {} | grep -o "stash@{[0-9]*}")
-                msg=$(echo {} | sed "s/^stash@{[0-9]*}: //")
+                msg=$(echo {} | sed "s/^stash@{[0-9]*}: //" | sed "s/)+/) +/g")
                 printf "%s" "unbind(a,p,d,r,v,/,q)+disable-search+change-prompt(Rename $stash: )+change-query($msg)+transform-header(printf '"'"'%s'"'"' \"'"$rename_header"'\")"
             ' \
             --bind 'v:execute(stash=$(echo {} | grep -o "stash@{[0-9]*}"); if command -v delta >/dev/null 2>&1; then git stash show -p "$stash" | delta --paging=always; else git stash show -p "$stash" | less; fi)' \
