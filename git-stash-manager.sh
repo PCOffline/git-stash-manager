@@ -207,6 +207,13 @@ fzf_mode() {
   ╰──────────────────────────────────────────────────────────╯
 '
     
+    # Header for rename mode
+    local rename_header=$'
+  ╭──────────────────────────────────────────────────────────╮
+  │  [RENAME]  Enter to save  ·  Esc to cancel               │
+  ╰──────────────────────────────────────────────────────────╯
+'
+    
     while true; do
         stashes=$(get_stashes)
         
@@ -228,12 +235,42 @@ fzf_mode() {
             --header-first \
             --bind "start:pos($last_pos)" \
             --bind '/:unbind(a,p,d,r,v,enter)+enable-search+clear-query+transform-header(printf '"'"'%s'"'"' "'"$search_header"'")' \
-            --bind 'esc:disable-search+rebind(a,p,d,r,v,enter)+first+transform-header(printf '"'"'%s'"'"' "'"$action_header"'")' \
-            --bind 'enter:become(echo ENTER:{})' \
+            --bind 'esc:disable-search+rebind(a,p,d,r,v,enter,/)+clear-query+first+transform-header(printf '"'"'%s'"'"' "'"$action_header"'")+change-prompt(> )' \
+            --bind 'enter:transform:
+                if [[ "$FZF_PROMPT" == Rename\ stash@* ]]; then
+                    # Extract stash ref from prompt "Rename stash@{N}: "
+                    stash_ref=$(echo "$FZF_PROMPT" | grep -o "stash@{[0-9]*}")
+                    new_msg="$FZF_QUERY"
+                    if [[ -z "$new_msg" ]]; then
+                        printf "%s" "rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
+                    else
+                        # Perform the rename
+                        commit=$(git rev-parse "$stash_ref" 2>&1) || {
+                            printf "%s" "change-header(  ✗ Failed to get stash commit)+rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )"
+                            exit 0
+                        }
+                        if git stash drop "$stash_ref" > /dev/null 2>&1; then
+                            if git stash store -m "$new_msg" "$commit" 2>&1; then
+                                printf "%s" "reload(git stash list)+rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )+first+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
+                            else
+                                printf "%s" "change-header(  ✗ Failed to store renamed stash)+rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )"
+                            fi
+                        else
+                            printf "%s" "change-header(  ✗ Failed to drop stash)+rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )"
+                        fi
+                    fi
+                else
+                    printf "become(echo ENTER:{})"
+                fi
+            ' \
             --bind 'a:become(echo apply:{})' \
             --bind 'p:become(echo pop:{})' \
             --bind 'd:become(echo drop:{})' \
-            --bind 'r:become(echo rename:{})' \
+            --bind 'r:transform:
+                stash=$(echo {} | grep -o "stash@{[0-9]*}")
+                msg=$(echo {} | sed "s/^stash@{[0-9]*}: //")
+                printf "%s" "unbind(a,p,d,r,v,/)+disable-search+change-prompt(Rename $stash: )+change-query($msg)+transform-header(printf '"'"'%s'"'"' \"'"$rename_header"'\")"
+            ' \
             --bind 'v:execute(stash=$(echo {} | grep -o "stash@{[0-9]*}"); if command -v delta >/dev/null 2>&1; then git stash show -p "$stash" | delta --paging=always; else git stash show -p "$stash" | less; fi)' \
             --bind 'q:abort' \
             )
@@ -299,11 +336,6 @@ fzf_mode() {
             drop)
                 do_drop "$stash_ref"
                 sleep 1
-                ;;
-            rename)
-                do_rename "$stash_ref"
-                sleep 1
-                last_pos=$((stash_num + 1))
                 ;;
         esac
     done
