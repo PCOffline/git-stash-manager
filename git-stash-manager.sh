@@ -18,12 +18,18 @@ NC=$'\033[0m' # No Color
 
 # Helper functions for colored output
 msg() { printf "%s%s%s\n" "$1" "$2" "$NC"; }
-msg_n() { printf "%s%s%s" "$1" "$2" "$NC"; }  # no newline
 
 # Load default action from config file
 load_default_action() {
     if [[ -f "$CONFIG_FILE" ]]; then
-        grep "^default_action=" "$CONFIG_FILE" 2>/dev/null | cut -d= -f2
+        local action
+        action=$(grep "^default_action=" "$CONFIG_FILE" 2>/dev/null | cut -d= -f2)
+        # Migrate stale "rename" config - delete and let user choose again
+        if [[ "$action" == "rename" ]]; then
+            rm -f "$CONFIG_FILE"
+            return
+        fi
+        echo "$action"
     fi
 }
 
@@ -74,6 +80,16 @@ check_git_repo() {
 # Check if fzf is available
 has_fzf() {
     command -v fzf > /dev/null 2>&1
+}
+
+# Check if fzf version is sufficient (requires 0.45.0+ for transform action)
+check_fzf_version() {
+    local version min_version="0.45.0"
+    version=$(fzf --version 2>/dev/null | grep -oE '^[0-9]+\.[0-9]+\.[0-9]+')
+    [[ -z "$version" ]] && return 1
+    
+    # Compare versions using sort -V
+    printf '%s\n%s\n' "$min_version" "$version" | sort -V | head -n1 | grep -q "^$min_version$"
 }
 
 # Check if delta is available (for better diff display)
@@ -186,9 +202,6 @@ do_rename() {
 fzf_mode() {
     local stashes
     local selection
-    local action
-    local stash_ref
-    local last_pos=1
     
     # Header for action mode
     local action_header=$'
@@ -212,6 +225,16 @@ fzf_mode() {
   ╰──────────────────────────────────────────────────────────╯
 '
     
+    # Header for confirm mode (used for apply/pop/drop)
+    local confirm_header=$'
+  ╭──────────────────────────────────────────────────────────╮
+  │  [CONFIRM]  y to confirm  ·  n or Esc to cancel          │
+  ╰──────────────────────────────────────────────────────────╯
+'
+    
+    # Get default action once (will prompt user if not configured)
+    local default_action=$(get_default_action)
+    
     while true; do
         stashes=$(get_stashes)
         
@@ -222,7 +245,8 @@ fzf_mode() {
         
         # Use fzf with preview and keybindings
         # Starts in action mode (--disabled), press / to search
-        selection=$(echo "$stashes" | fzf \
+        # Export default_action for use in transform bindings
+        selection=$(echo "$stashes" | DEFAULT_ACTION="$default_action" fzf \
             --ansi \
             --no-multi \
             --sync \
@@ -231,106 +255,102 @@ fzf_mode() {
             --preview-window=right:60%:wrap \
             --header "$action_header" \
             --header-first \
-            --bind "start:pos($last_pos)" \
+            --bind 'start:unbind(y,n)' \
             --bind '/:unbind(a,p,d,r,v,enter)+enable-search+clear-query+transform-header(printf '"'"'%s'"'"' "'"$search_header"'")' \
-            --bind 'esc:disable-search+rebind(a,p,d,r,v,enter,/)+clear-query+first+transform-header(printf '"'"'%s'"'"' "'"$action_header"'")+change-prompt(> )' \
+            --bind 'esc:disable-search+rebind(a,p,d,r,v,enter,/,q)+unbind(y,n)+clear-query+first+transform-header(printf '"'"'%s'"'"' "'"$action_header"'")+change-prompt(> )' \
             --bind 'enter:transform:
                 if [[ "$FZF_PROMPT" == Rename\ stash@* ]]; then
                     # Extract stash ref from prompt "Rename stash@{N}: "
                     stash_ref=$(echo "$FZF_PROMPT" | grep -o "stash@{[0-9]*}")
                     new_msg="$FZF_QUERY"
                     if [[ -z "$new_msg" ]]; then
-                        printf "%s" "rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
+                        printf "%s" "rebind(a,p,d,r,v,/,q)+disable-search+clear-query+change-prompt(> )+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
                     else
                         # Perform the rename
                         commit=$(git rev-parse "$stash_ref" 2>&1) || {
-                            printf "%s" "change-header(  ✗ Failed to get stash commit)+rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )"
+                            printf "%s" "change-header(  ✗ Failed to get stash commit)+rebind(a,p,d,r,v,/,q)+disable-search+clear-query+change-prompt(> )"
                             exit 0
                         }
                         if git stash drop "$stash_ref" > /dev/null 2>&1; then
                             if git stash store -m "$new_msg" "$commit" 2>&1; then
-                                printf "%s" "reload(git stash list)+rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )+first+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
+                                printf "%s" "reload(git stash list)+rebind(a,p,d,r,v,/,q)+disable-search+clear-query+change-prompt(> )+first+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
                             else
-                                printf "%s" "change-header(  ✗ Failed to store renamed stash)+rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )"
+                                printf "%s" "change-header(  ✗ Failed to store renamed stash)+rebind(a,p,d,r,v,/,q)+disable-search+clear-query+change-prompt(> )"
                             fi
                         else
-                            printf "%s" "change-header(  ✗ Failed to drop stash)+rebind(a,p,d,r,v,/)+disable-search+clear-query+change-prompt(> )"
+                            printf "%s" "change-header(  ✗ Failed to drop stash)+rebind(a,p,d,r,v,/,q)+disable-search+clear-query+change-prompt(> )"
                         fi
                     fi
-                else
-                    printf "become(echo ENTER:{})"
+                elif [[ "$FZF_PROMPT" == "> " ]] || [[ "$FZF_PROMPT" == "" ]]; then
+                    # Default action mode - trigger based on DEFAULT_ACTION
+                    stash=$(echo {} | grep -o "stash@{[0-9]*}")
+                    case "$DEFAULT_ACTION" in
+                        view)
+                            printf "%s" "execute(if command -v delta >/dev/null 2>&1; then git stash show -p $stash | delta --paging=always; else git stash show -p $stash | less; fi)"
+                            ;;
+                        apply)
+                            printf "%s" "unbind(a,p,d,r,v,/,enter)+rebind(y,n)+change-prompt(Apply $stash? )+transform-header(printf '"'"'%s'"'"' \"'"$confirm_header"'\")"
+                            ;;
+                        pop)
+                            printf "%s" "unbind(a,p,d,r,v,/,enter)+rebind(y,n)+change-prompt(Pop $stash? )+transform-header(printf '"'"'%s'"'"' \"'"$confirm_header"'\")"
+                            ;;
+                    esac
                 fi
             ' \
-            --bind 'a:become(echo apply:{})' \
-            --bind 'p:become(echo pop:{})' \
-            --bind 'd:become(echo drop:{})' \
+            --bind 'a:transform:
+                stash=$(echo {} | grep -o "stash@{[0-9]*}")
+                printf "%s" "unbind(a,p,d,r,v,/,enter)+rebind(y,n)+change-prompt(Apply $stash? )+transform-header(printf '"'"'%s'"'"' \"'"$confirm_header"'\")"
+            ' \
+            --bind 'p:transform:
+                stash=$(echo {} | grep -o "stash@{[0-9]*}")
+                printf "%s" "unbind(a,p,d,r,v,/,enter)+rebind(y,n)+change-prompt(Pop $stash? )+transform-header(printf '"'"'%s'"'"' \"'"$confirm_header"'\")"
+            ' \
+            --bind 'd:transform:
+                stash=$(echo {} | grep -o "stash@{[0-9]*}")
+                printf "%s" "unbind(a,p,d,r,v,/,enter)+rebind(y,n)+change-prompt(Drop $stash? )+transform-header(printf '"'"'%s'"'"' \"'"$confirm_header"'\")"
+            ' \
+            --bind 'y:transform:
+                if [[ "$FZF_PROMPT" == Apply\ stash@* ]]; then
+                    stash_ref=$(echo "$FZF_PROMPT" | grep -o "stash@{[0-9]*}")
+                    if git stash apply "$stash_ref" > /dev/null 2>&1; then
+                        printf "%s" "rebind(a,p,d,r,v,/,enter)+unbind(y,n)+change-prompt(> )+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
+                    else
+                        printf "%s" "change-header(  ✗ Failed to apply $stash_ref)+rebind(a,p,d,r,v,/,enter)+unbind(y,n)+change-prompt(> )"
+                    fi
+                elif [[ "$FZF_PROMPT" == Pop\ stash@* ]]; then
+                    stash_ref=$(echo "$FZF_PROMPT" | grep -o "stash@{[0-9]*}")
+                    if git stash pop "$stash_ref" > /dev/null 2>&1; then
+                        printf "%s" "reload(git stash list)+rebind(a,p,d,r,v,/,enter)+unbind(y,n)+change-prompt(> )+first+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
+                    else
+                        printf "%s" "change-header(  ✗ Failed to pop $stash_ref)+rebind(a,p,d,r,v,/,enter)+unbind(y,n)+change-prompt(> )"
+                    fi
+                elif [[ "$FZF_PROMPT" == Drop\ stash@* ]]; then
+                    stash_ref=$(echo "$FZF_PROMPT" | grep -o "stash@{[0-9]*}")
+                    if git stash drop "$stash_ref" > /dev/null 2>&1; then
+                        printf "%s" "reload(git stash list)+rebind(a,p,d,r,v,/,enter)+unbind(y,n)+change-prompt(> )+first+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
+                    else
+                        printf "%s" "change-header(  ✗ Failed to drop $stash_ref)+rebind(a,p,d,r,v,/,enter)+unbind(y,n)+change-prompt(> )"
+                    fi
+                fi
+            ' \
+            --bind 'n:transform:
+                if [[ "$FZF_PROMPT" == Apply\ stash@* ]] || [[ "$FZF_PROMPT" == Pop\ stash@* ]] || [[ "$FZF_PROMPT" == Drop\ stash@* ]]; then
+                    printf "%s" "rebind(a,p,d,r,v,/,enter)+unbind(y,n)+change-prompt(> )+transform-header(printf '"'"'%s'"'"' \"'"$action_header"'\")"
+                fi
+            ' \
             --bind 'r:transform:
                 stash=$(echo {} | grep -o "stash@{[0-9]*}")
                 msg=$(echo {} | sed "s/^stash@{[0-9]*}: //")
-                printf "%s" "unbind(a,p,d,r,v,/)+disable-search+change-prompt(Rename $stash: )+change-query($msg)+transform-header(printf '"'"'%s'"'"' \"'"$rename_header"'\")"
+                printf "%s" "unbind(a,p,d,r,v,/,q)+disable-search+change-prompt(Rename $stash: )+change-query($msg)+transform-header(printf '"'"'%s'"'"' \"'"$rename_header"'\")"
             ' \
             --bind 'v:execute(stash=$(echo {} | grep -o "stash@{[0-9]*}"); if command -v delta >/dev/null 2>&1; then git stash show -p "$stash" | delta --paging=always; else git stash show -p "$stash" | less; fi)' \
             --bind 'q:abort' \
             )
         
-        # Parse the selection (format: "action:stash_line" from become())
+        # FZF exited - either user quit or all stashes were processed
         if [[ -z "$selection" ]]; then
             return 0
         fi
-        
-        # Extract action and stash ref from "action:stash_line" format
-        if [[ "$selection" != *":"* ]]; then
-            continue
-        fi
-        
-        action="${selection%%:*}"
-        stash_ref=$(get_stash_ref "${selection#*:}")
-        
-        if [[ -z "$stash_ref" ]]; then
-            continue
-        fi
-        
-        # Extract stash number for position tracking (stash@{N} -> N+1 for 1-indexed fzf)
-        local stash_num="${stash_ref#stash@\{}"
-        stash_num="${stash_num%\}}"
-        
-        # Execute the action
-        case "$action" in
-            ENTER)
-                # Get or prompt for default action (lazy - only prompts if not configured)
-                local default_action=$(get_default_action)
-                case "$default_action" in
-                    apply)
-                        do_apply "$stash_ref"
-                        sleep 1
-                        ;;
-                    view)
-                        do_view "$stash_ref"
-                        last_pos=$((stash_num + 1))
-                        ;;
-                    pop)
-                        do_pop "$stash_ref"
-                        sleep 1
-                        ;;
-                esac
-                ;;
-            apply)
-                do_apply "$stash_ref"
-                sleep 1
-                ;;
-            view)
-                do_view "$stash_ref"
-                last_pos=$((stash_num + 1))
-                ;;
-            pop)
-                do_pop "$stash_ref"
-                sleep 1
-                ;;
-            drop)
-                do_drop "$stash_ref"
-                sleep 1
-                ;;
-        esac
     done
 }
 
@@ -427,10 +447,14 @@ simple_mode() {
 main() {
     check_git_repo
     
-    if has_fzf; then
+    if has_fzf && check_fzf_version; then
         fzf_mode
     else
-        msg "$YELLOW" "Note: Install fzf for a better experience (brew install fzf)"
+        if has_fzf; then
+            msg "$YELLOW" "Note: fzf 0.45.0+ required for interactive mode (found older version)"
+        else
+            msg "$YELLOW" "Note: Install fzf for a better experience (brew install fzf)"
+        fi
         printf "\n"
         simple_mode
     fi

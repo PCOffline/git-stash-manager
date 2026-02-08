@@ -70,13 +70,14 @@ On first run, you'll be prompted to choose a default action for the Enter key (a
 
 ### No interactive interface / numbered menu appears
 
-The interactive UI requires [fzf](https://github.com/junegunn/fzf). Without it, a fallback numbered menu is used instead.
+The interactive UI requires [fzf](https://github.com/junegunn/fzf) version **0.45.0 or later**. Without it (or with an older version), a fallback numbered menu is used instead.
 
-Install fzf manually:
+Install or upgrade fzf:
 
 ```bash
 # macOS
 brew install fzf
+# or upgrade: brew upgrade fzf
 
 # Debian/Ubuntu
 sudo apt install fzf
@@ -84,6 +85,8 @@ sudo apt install fzf
 # Arch
 sudo pacman -S fzf
 ```
+
+Check your fzf version with `fzf --version`.
 
 ### Diffs are not syntax-highlighted
 
