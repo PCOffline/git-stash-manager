@@ -40,15 +40,13 @@ prompt_default_action() {
     printf "  %sa)%s Apply stash\n" "$CYAN" "$NC" >&2
     printf "  %sv)%s View full diff in pager\n" "$CYAN" "$NC" >&2
     printf "  %sp)%s Pop stash (apply + remove)\n" "$CYAN" "$NC" >&2
-    printf "  %sr)%s Rename stash\n" "$CYAN" "$NC" >&2
     printf "\n" >&2
-    printf "%sChoice [a/v/p/r]: %s" "$YELLOW" "$NC" >&2
+    printf "%sChoice [a/v/p]: %s" "$YELLOW" "$NC" >&2
     read -r choice
     case "$choice" in
         a|A) echo "apply" ;;
         v|V) echo "view" ;;
         p|P) echo "pop" ;;
-        r|R) echo "rename" ;;
         *) echo "apply" ;;
     esac
 }
@@ -313,11 +311,6 @@ fzf_mode() {
                     pop)
                         do_pop "$stash_ref"
                         sleep 1
-                        ;;
-                    rename)
-                        do_rename "$stash_ref"
-                        sleep 1
-                        last_pos=$((stash_num + 1))
                         ;;
                 esac
                 ;;
