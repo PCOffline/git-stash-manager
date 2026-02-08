@@ -170,12 +170,16 @@ do_rename() {
         return
     fi
     
-    # Store new stash first, then drop old one (safer order)
-    if git stash store -m "$new_message" "$stash_commit"; then
-        git stash drop "$stash_ref" > /dev/null 2>&1
-        msg "$GREEN" "Renamed stash"
+    # Drop first (removes from reflog), then store with new message
+    if git stash drop "$stash_ref" > /dev/null 2>&1; then
+        if git stash store -m "$new_message" "$stash_commit"; then
+            msg "$GREEN" "Renamed stash"
+        else
+            msg "$RED" "Failed to store renamed stash"
+            return 1
+        fi
     else
-        msg "$RED" "Failed to rename stash"
+        msg "$RED" "Failed to drop stash"
         return 1
     fi
 }
